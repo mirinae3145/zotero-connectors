@@ -42,6 +42,7 @@ const fake=http.createServer(async(req,res)=>{
   res.setHeader('Content-Type','text/html');res.setHeader('Set-Cookie','access=granted; Path=/; SameSite=Lax');
   res.end(`<html><head><title>Browser bridge integration paper</title><meta name="citation_title" content="Browser bridge integration paper"><meta name="citation_author" content="Fixture Author"><meta name="citation_date" content="2026"><meta name="citation_journal_title" content="Bridge Test"><meta name="citation_pdf_url" content="${base}/paper.pdf"></head><body>Browser-only PDF<iframe src="${base}/frame"></iframe></body></html>`);return;
  }
+ if(route.pathname==='/detection-ready'){await new Promise(r=>setTimeout(r,1500));return send({ready:true});}
  if(route.pathname==='/frame'){res.setHeader('Content-Type','text/html');res.end('<html><body>Embedded frame</body></html>');return;}
  if(route.pathname==='/paper.pdf'){
   if(denyPDF || !req.headers.cookie?.includes('access=granted'))return send({error:'browser cookie required'},403);
@@ -68,7 +69,7 @@ try{
  const target=await browser.waitForTarget(t=>t.type()==='service_worker',{timeout:20000}); const worker=await target.worker();
  await worker.evaluate(async()=>{await Zotero.initDeferred.promise; await Zotero.Translators.init(); for(let n=0;n<300 && Zotero.Prefs.get('lastVersion')!==Zotero.version;n++) await new Promise(r=>setTimeout(r,100));});
  const meta={translatorID:'2f22f127-101f-4f9a-b498-999999999999',label:'Bridge fixture',creator:'Test',target:'^http://127\\.0\\.0\\.1:',minVersion:'3.0',maxVersion:'',priority:1,inRepository:true,translatorType:4,browserSupport:'gcsibv',lastUpdated:'2026-10-12 00:00:00'};
- const translatorCode=JSON.stringify(meta)+'\nfunction detectWeb(doc,url){return "journalArticle";}\nfunction doWeb(doc,url){var item=new Zotero.Item("journalArticle");item.title="Browser bridge integration paper";item.url=url;item.attachments=[{title:"Full Text PDF",url:url.replace("/paper","/paper.pdf"),mimeType:"application/pdf"}];item.complete();}';
+ const translatorCode=JSON.stringify(meta)+'\nasync function detectWeb(doc,url){if(url.includes("/frame"))return false;if(url.includes("late=1"))await Zotero.Utilities.HTTP.request("GET",new URL("/detection-ready",url).href);return "journalArticle";}\nfunction doWeb(doc,url){var item=new Zotero.Item("journalArticle");item.title="Browser bridge integration paper";item.url=url;item.attachments=[{title:"Full Text PDF",url:url.replace("/paper","/paper.pdf"),mimeType:"application/pdf"}];item.complete();}';
  await worker.evaluate(async({base,meta,translatorCode,token,port})=>{
   await Zotero.Prefs.set('connector.url',base+'/');await Zotero.Prefs.set('firstUse',false);
   await Zotero.Prefs.set('translatorMetadata',[meta]);
@@ -154,6 +155,12 @@ try{
  assert.equal(batch.ok,true);assert.equal(batch.data.completed.length,2);
  assert.ok(batch.data.completed.every(e=>e.result.tab.closed));
  assert.equal(batch.data.deferred.length,0);
+ const lateStarted=Date.now();
+ const late=await cli(['save','--url',base+'/paper?late=1','--destination','L4','--background','--close-on-success','--ready-timeout','10','--timeout','30']);
+ assert.equal(late.ok,true,JSON.stringify(late));assert.equal(late.data.result.tab.closed,true);
+ assert.equal(late.data.result.items[0].attachments[0].stored,true);
+ assert.ok(Date.now()-lateStarted>=1500);
+ console.log('PASS: asynchronous translator detection saves PDF without a second request');
  const moved=await cli(['save','--url',base+'/paper?destination=1','--target','L4','--destination','L5','--background','--close-on-success','--timeout','30']);
  assert.equal(moved.ok,true);assert.equal(moved.data.result.destinationApplied,true);
  assert.equal(moved.data.result.target,'L5');assert.equal(moved.data.result.libraryID,5);

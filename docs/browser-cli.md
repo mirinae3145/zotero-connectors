@@ -140,3 +140,15 @@ may still show its original destination; inspect Zotero and the returned receipt
 Avoid editing the save popup while the automatic save/move is running.
 PDF validation still applies after movement; inspect the actual final-library item and PDF for correct content.
 The move uses native session identifiers, not a library search followed by a separate item move.
+
+## Timing controls
+
+- `browser batch --interval SECONDS` controls the gap after one paper's result and before the next submission. Default: 2 seconds; range: 0.5–60. It does not control page loading or translator detection. Individual `save` calls have no batch gap; callers pacing separate saves own their interval.
+- `browser save|batch --ready-timeout SECONDS` controls page readiness polling. Default: 30 seconds; range: 0.5–120. A PDF save waits for an actual translator or PDF even after an empty detection callback. It proceeds immediately when ready. `open` and `save --allow-no-pdf` do not require a publication translator.
+- `--timeout SECONDS` controls the CLI's wait for each job (default: 120). Choose a value larger than the readiness budget with enough time for PDF downloads. A client timeout does not cancel a running save; recover its job with `browser result`.
+
+For example: `zotero-cli --json browser batch URL1 URL2 --destination TARGET_ID --interval 5 --ready-timeout 60 --timeout 180`.
+These are per-invocation options, not persistent profile settings. Update both forks and reload the Connector for readiness waiting.
+If detection expires with no translator, the result is `state: loading`, `waitingFor: translator`, and no write starts.
+This may indicate slow detection or an unsupported page; it is not proof of a CAPTCHA or a need for human intervention.
+After the automatic pass, inspect retained tabs and resume the same tab once only if a concrete condition has changed, such as a newly detected translator.

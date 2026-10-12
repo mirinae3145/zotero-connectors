@@ -229,3 +229,29 @@ test('destination does not move a reused save session', async () => {
     const r=await c.Zotero.BrowserBridge.execute({...backgroundSave,destination:'L5'});
     assert.equal(r.ok,false);assert.equal(r.destinationApplied,false);assert.equal(c.removed,undefined);
 });
+
+
+test('save waits past an empty detection result for a late translator', async () => {
+    const c = context(); let ticks = 0;
+    c.setTimeout = callback => {ticks++;callback();};
+    c.Zotero.Connector_Browser.getTabInfo = () => ({detectionDone:true,
+        translators:ticks >= 4 ? [{label:'Late translator'}] : []});
+    const result = await c.Zotero.BrowserBridge.execute({action:'save',tab_id:1,ready_timeout:2});
+    assert.equal(result.ok,true);assert.equal(c.calls.length,1);assert.equal(ticks,4);
+});
+test('exhausted translator wait reports loading without saving or demanding user action', async () => {
+    const c = context(); let ticks = 0;
+    c.setTimeout = callback => {ticks++;callback();};
+    c.Zotero.Connector_Browser.getTabInfo = () => ({detectionDone:true,translators:[]});
+    const result = await c.Zotero.BrowserBridge.execute({action:'save',tab_id:1,ready_timeout:0.5});
+    assert.equal(result.ok,false);assert.equal(result.state,'loading');
+    assert.equal(result.waitingFor,'translator');assert.equal(c.calls.length,0);assert.equal(ticks,2);
+});
+test('opening a detected page does not wait for a publication translator', async () => {
+    const c=context();let ticks=0;
+    c.setTimeout=callback=>{ticks++;callback();};
+    c.browser.tabs.create=async()=>({id:9});
+    c.Zotero.Connector_Browser.getTabInfo=()=>({detectionDone:true,translators:[]});
+    const result=await c.Zotero.BrowserBridge.execute({action:'open',url:'https://journal.example/article'});
+    assert.equal(result.ok,true);assert.equal(ticks,0);
+});

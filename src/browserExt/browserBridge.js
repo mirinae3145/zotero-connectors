@@ -33,9 +33,19 @@ Zotero.BrowserBridge = new class {
 		else {
 			tab = await browser.tabs.get(request.tab_id);
 		}
-		for (let n = 0; n < 120; n++) {
+		const seconds = request.ready_timeout ?? 30;
+		if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0.5 || seconds > 120) {
+			throw new Error('ready_timeout must be between 0.5 and 120 seconds');
+		}
+		const needsTranslator = request.action === 'save' && request.require_pdf !== false;
+		for (let n = 0; n < Math.ceil(seconds * 4); n++) {
 			tab = await browser.tabs.get(tab.id);
-			if (/^https?:/.test(tab.url) && this._tabStatus(tab).state === 'ready') return tab;
+			if (/^https?:/.test(tab.url)) {
+				const page = this._tabStatus(tab);
+				// An empty detection callback can precede late metadata or a frame's
+				// translator. Page readiness alone is insufficient for a PDF save.
+				if (page.state === 'ready' && (!needsTranslator || page.isPDF || page.translators.length)) return tab;
+			}
 			await new Promise(resolve => setTimeout(resolve, 250));
 		}
 		return tab;
@@ -113,7 +123,7 @@ Zotero.BrowserBridge = new class {
 		const target = selected.id ? `C${selected.id}` : `L${selected.libraryID}`;
 		if (request.action === 'targets') {
 			return { ok: true, selected: target, libraryID: selected.libraryID,
-				libraryName: selected.libraryName, targets: selected.targets, capabilities: ['destination'] };
+				libraryName: selected.libraryName, targets: selected.targets, capabilities: ['destination', 'ready_timeout'] };
 		}
 		if (request.action !== 'save') throw new Error('Unknown browser action');
 		if (request.target && request.target !== target) {
@@ -145,8 +155,8 @@ Zotero.BrowserBridge = new class {
 				error: 'Connector item selection is required; deferred without starting a save'};
 		}
 		if (request.require_pdf !== false && !info.translators?.length && !info.isPDF) {
-			return {ok: false, tab: page, state: 'needs_user_action',
-				error: 'Connector found no publication translator or PDF; inspect login/access in this tab before saving'};
+			return {ok: false, tab: page, state: 'loading', waitingFor: 'translator',
+				error: 'Publication translator was not detected within the readiness budget; inspect this same tab before retrying. It may be slow or unsupported'};
 		}
 		if (!info.detectionDone && !info.isPDF && !info.uninjectable) {
 			throw new Error('Connector detection is not ready; reload the publication tab and retry');
