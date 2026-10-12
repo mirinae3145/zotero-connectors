@@ -64,3 +64,34 @@ ZOTERO_MCP_CHECKOUT=/path/to/zotero-mcp PYTHON=/path/to/python node test/browser
 This starts an isolated Chromium profile, a cookie-protected fixture publisher, a mock Zotero endpoint and the actual CLI broker.
 It runs the real translator and attachment pipeline, checks the uploaded bytes and repeat-save behavior, and verifies a PDF failure after metadata creation.
 It does not write to your Zotero library.
+
+## Background tabs and responsibility boundaries
+
+`browser open URL --background` and `browser save --url URL --background` create an inactive tab without focusing its window.
+Without the flag, URL commands retain foreground behavior.
+This uses a running browser with its existing session; it is not headless execution and does not launch a browser process.
+
+For an unattended save, add `--close-on-success` to a background URL save.
+Only a tab created by that very request can be closed, after a confirmed successful receipt.
+Existing tabs (including a tab retained from an earlier open or failed save) are never automatically closed.
+Failures, uncertain outcomes and tabs activated, pinned or navigated elsewhere during saving are retained.
+Results expose `tab.createdByRequest`, and when cleanup is requested, `tab.closed` plus a `tab.closeReason` when retained.
+A cleanup failure does not invalidate a successful save; do not repeat the save to retry cleanup.
+Closing a tab follows storage confirmation, not independent verification of the paper's identity or completeness.
+
+Use `browser focus --tab-id ID` explicitly when a retained tab needs user interaction, then resume saving with `--tab-id ID`.
+The Connector does not automatically focus failed tabs, solve CAPTCHAs, or control third-party challenge extensions.
+Such extensions are optional browser-environment components; page readiness determines whether saving proceeds.
+
+The Connector owns tab execution and conservative cleanup; the CLI/broker owns transport, job IDs and receipt recovery.
+The caller owns duplicate checks, paper verification, retry limits and deciding when to notify the user or focus a tab.
+A future headless launcher would own browser processes and profiles separately.
+
+```sh
+zotero-cli --json browser save --url https://doi.org/10.1002/pola.11083 --target L4 --background --close-on-success
+zotero-cli --json browser focus --tab-id 42
+zotero-cli --json browser save --tab-id 42 --target L4
+```
+
+Use the actual target and tab IDs returned in your environment.
+Update both forks together to use these options; older Connectors may ignore unsupported request fields.

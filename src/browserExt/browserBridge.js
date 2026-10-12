@@ -20,14 +20,15 @@ Zotero.BrowserBridge = new class {
 			translators: (info.translators || []).map(t => t.label), isPDF: !!info.isPDF };
 	}
 
-	async _openOrGet(request) {
+	async _openOrGet(request, context) {
 		let tab;
 		if (request.url) {
 			const url = new URL(request.url);
 			if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) {
 				throw new Error('Select an HTTP(S) publication URL without credentials');
 			}
-			tab = await browser.tabs.create({url: request.url, active: true});
+			tab = await browser.tabs.create({url: request.url, active: !request.background});
+			context.createdTabId = tab.id;
 		}
 		else {
 			tab = await browser.tabs.get(request.tab_id);
@@ -41,6 +42,47 @@ Zotero.BrowserBridge = new class {
 	}
 
 	async execute(request) {
+		const context = {activated: new Set()};
+		const onActivated = ({tabId}) => context.activated.add(tabId);
+		browser.tabs.onActivated.addListener(onActivated);
+		try {
+			const result = await this._execute(request, context);
+			if (result.tab) result.tab.createdByRequest = context.createdTabId === result.tab.id;
+			if (request.close_on_success && result.tab) {
+				result.tab.closed = false;
+				if (!result.ok) result.tab.closeReason = 'save_not_confirmed';
+				else if (context.createdTabId !== result.tab.id) result.tab.closeReason = 'existing_tab';
+				else {
+					try {
+						const tab = await browser.tabs.get(context.createdTabId);
+						if (context.activated.has(tab.id) || tab.active || tab.pinned || tab.url !== context.savedURL) {
+							result.tab.closeReason = 'tab_changed_or_activated';
+						}
+						else {
+							await browser.tabs.remove(tab.id);
+							result.tab.closed = true;
+						}
+					}
+					catch (_) {
+						// Cleanup must not turn a confirmed save into a retryable failure.
+						result.tab.closeReason = 'cleanup_unavailable';
+					}
+				}
+			}
+			return result;
+		}
+		catch (error) {
+			if (context.createdTabId === undefined) throw error;
+			return {ok: false, state: 'outcome_unknown',
+				tab: {id: context.createdTabId, createdByRequest: true, closed: false},
+				error: 'Connector could not complete the request; inspect this tab and Zotero before retrying'};
+		}
+		finally {
+			browser.tabs.onActivated.removeListener(onActivated);
+		}
+	}
+
+	async _execute(request, context) {
 		if (request.action === 'tabs') {
 			const tabs = await browser.tabs.query({});
 			return { ok: true, tabs: tabs.filter(t => /^https?:/.test(t.url)).map(t => {
@@ -49,13 +91,20 @@ Zotero.BrowserBridge = new class {
 				return { id: t.id, title: t.title, url: url.origin + url.pathname, active: t.active };
 			}) };
 		}
+		if (request.action === 'focus') {
+			const tab = await browser.tabs.get(request.tab_id);
+			if (!/^https?:/.test(tab.url)) throw new Error('Select an HTTP(S) publication tab');
+			await browser.tabs.update(tab.id, {active: true});
+			await browser.windows.update(tab.windowId, {focused: true});
+			return {ok: true, tab: this._tabStatus(tab)};
+		}
 		if (request.action === 'inspect') {
 			const tab = await browser.tabs.get(request.tab_id);
 			if (!/^https?:/.test(tab.url)) throw new Error('Select an HTTP(S) publication tab');
 			return {ok: true, tab: this._tabStatus(tab)};
 		}
 		if (request.action === 'open') {
-			return {ok: true, tab: this._tabStatus(await this._openOrGet(request))};
+			return {ok: true, tab: this._tabStatus(await this._openOrGet(request, context))};
 		}
 		if (!await Zotero.Connector.checkIsOnline()) {
 			throw new Error('Open Zotero desktop before using browser CLI saving');
@@ -76,9 +125,10 @@ Zotero.BrowserBridge = new class {
 		if (Zotero.Prefs.get('firstUse')) {
 			throw new Error('Complete the Connector first-use prompt with its toolbar button first');
 		}
-		const tab = await this._openOrGet(request);
+		const tab = await this._openOrGet(request, context);
 		if (!/^https?:/.test(tab.url)) throw new Error('Select an HTTP(S) publication tab');
 		const page = this._tabStatus(tab);
+		context.savedURL = tab.url;
 		if (page.state !== 'ready') {
 			return {ok: false, tab: page, state: page.state,
 				error: 'Connector page needs attention or is still loading; resolve it in the browser, then save the same tab ID'};

@@ -134,6 +134,21 @@ try{
  assert.equal(inspected.ok,true);assert.equal(inspected.data.result.tab.state,'ready');
  const fromURL=await cli(['save','--url',base+'/paper?save=1','--target','L4','--timeout','30']);
  assert.equal(fromURL.ok,true);assert.equal(saves.length,4);assert.equal(uploads.length,3);
+ // New background tabs must not replace the active tab, and close only on success.
+ const activeBefore=await worker.evaluate(async()=> (await browser.tabs.query({active:true,currentWindow:true}))[0].id);
+ const background=await cli(['save','--url',base+'/paper?background=1','--target','L4','--background','--close-on-success','--timeout','30']);
+ assert.equal(background.ok,true);assert.equal(background.data.result.tab.closed,true);
+ assert.equal(await worker.evaluate(async()=> (await browser.tabs.query({active:true,currentWindow:true}))[0].id),activeBefore);
+ assert.equal(await worker.evaluate(async id=> (await browser.tabs.query({})).some(t=>t.id===id),background.data.result.tab.id),false);
+ denyPDF=true;
+ const retained=await cli(['save','--url',base+'/paper?background=failed','--target','L4','--background','--close-on-success','--timeout','30']);
+ assert.equal(retained.ok,false);assert.equal(retained.data.result.tab.closed,false);
+ const retainedID=retained.data.result.tab.id;
+ assert.equal(await worker.evaluate(async id=> (await browser.tabs.get(id)).active,retainedID),false);
+ const focused=await cli(['focus','--tab-id',String(retainedID)]);
+ assert.equal(focused.ok,true);
+ assert.equal(await worker.evaluate(async id=> (await browser.tabs.get(id)).active,retainedID),true);
+ console.log('PASS: background PDF save and cleanup, focus preservation, failed tab retention and explicit focus');
  console.log('PASS: actual translator, cookie-bound PDF, binary upload, repeat safety, failed-PDF receipt, ordinary toolbar save and URL-driven opening/saving');
 }catch(e){console.error(e);process.exitCode=1;}
 finally{await browser.close();fake.close();broker.kill();await fs.rm(temp,{recursive:true,force:true});}

@@ -19,6 +19,8 @@ function context() {
     };
     c.browser = { tabs: { get: async id => ({id, url: 'https://journal.example/article', status: 'complete'}),
         query: async () => [{id: 1, url: 'https://journal.example/article?token=secret', title: 'Paper'}] } };
+    c.activated = new Set();
+    c.browser.tabs.onActivated = {addListener: f => c.activated.add(f), removeListener: f => c.activated.delete(f)};
     c.receipt = {sessionID: 'session', desktopSaved: true, target: 'L4', items: [{attachments: [{mimeType: 'application/pdf', stored: true}]}]};
     vm.createContext(c);
     vm.runInContext(fs.readFileSync(path.join(root, 'src/browserExt/browserBridge.js'), 'utf8'), c);
@@ -126,4 +128,63 @@ test('destination change while opening a URL stops before writing', async () => 
     c.browser.tabs.create=async()=>{c.selected={...c.selected,libraryID:1};return {id:9};};
     const result=await c.Zotero.BrowserBridge.execute({action:'save',url:'https://journal.example/article'});
     assert.equal(result.ok,false);assert.equal(c.calls.length,0);
+});
+
+function backgroundContext() {
+    const c = context();
+    c.tab = {id: 9, windowId: 2, url: 'https://journal.example/article', status: 'complete', active: false};
+    c.browser.tabs.create = async options => {c.openOptions = options; return c.tab;};
+    c.browser.tabs.get = async () => c.tab;
+    c.browser.tabs.remove = async id => {c.removed = id;};
+    return c;
+}
+const backgroundSave = {action:'save',url:'https://journal.example/article',background:true,close_on_success:true};
+test('background success closes only its created inactive tab', async () => {
+    const c=backgroundContext();const result=await c.Zotero.BrowserBridge.execute(backgroundSave);
+    assert.equal(c.openOptions.active,false);assert.equal(c.removed,9);
+    assert.equal(result.ok,true);assert.equal(result.tab.closed,true);assert.equal(c.activated.size,0);
+});
+test('partial save keeps its background tab and receipt', async () => {
+    const c=backgroundContext();c.receipt.items[0].attachments=[];
+    const result=await c.Zotero.BrowserBridge.execute(backgroundSave);
+    assert.equal(result.ok,false);assert.equal(result.tab.closed,false);assert.equal(c.removed,undefined);
+    assert.equal(result.sessionID,'session');
+});
+test('challenge and unknown outcomes retain the created tab ID', async () => {
+    const c=backgroundContext();c.tab.title='Just a moment...';
+    let result=await c.Zotero.BrowserBridge.execute(backgroundSave);
+    assert.equal(result.state,'needs_user_action');assert.equal(result.tab.id,9);assert.equal(c.removed,undefined);
+    c.tab.title='Paper';c.Zotero.Connector_Browser.onZoteroButtonElementClick=async()=>{throw Error('private URL');};
+    result=await c.Zotero.BrowserBridge.execute(backgroundSave);
+    assert.equal(result.state,'outcome_unknown');assert.equal(result.tab.id,9);assert.equal(c.removed,undefined);
+    assert.ok(!result.error.includes('private URL'));
+});
+test('existing tabs are never automatically closed', async () => {
+    const c=backgroundContext();const result=await c.Zotero.BrowserBridge.execute({action:'save',tab_id:9,close_on_success:true});
+    assert.equal(result.ok,true);assert.equal(result.tab.closeReason,'existing_tab');assert.equal(c.removed,undefined);
+});
+test('user activation, pinning or navigation preserves the tab', async () => {
+    for(const change of ['activation','pin','url']) {
+        const c=backgroundContext();
+        c.Zotero.Connector_Browser.onZoteroButtonElementClick=async()=>{
+            if(change==='activation') for(const f of c.activated) f({tabId:9});
+            if(change==='pin') c.tab.pinned=true;
+            if(change==='url') c.tab.url='https://journal.example/other';
+            return c.receipt;
+        };
+        const result=await c.Zotero.BrowserBridge.execute(backgroundSave);
+        assert.equal(result.ok,true);assert.equal(c.removed,undefined);assert.equal(result.tab.closeReason,'tab_changed_or_activated');
+    }
+});
+test('cleanup failure preserves successful receipt', async () => {
+    const c=backgroundContext();c.browser.tabs.remove=async()=>{throw Error('closed elsewhere');};
+    const result=await c.Zotero.BrowserBridge.execute(backgroundSave);
+    assert.equal(result.ok,true);assert.equal(result.sessionID,'session');assert.equal(result.tab.closeReason,'cleanup_unavailable');
+});
+test('focus explicitly activates the requested tab and its window', async () => {
+    const c=backgroundContext();c.browser.tabs.update=async(id,options)=>{c.focusTab={id,...options};};
+    c.browser.windows={update:async(id,options)=>{c.focusWindow={id,...options};}};
+    const result=await c.Zotero.BrowserBridge.execute({action:'focus',tab_id:9});
+    assert.equal(result.ok,true);assert.equal(c.focusTab.id,9);assert.equal(c.focusTab.active,true);
+    assert.equal(c.focusWindow.id,2);assert.equal(c.focusWindow.focused,true);assert.equal(c.calls.length,0);
 });
