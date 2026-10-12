@@ -171,7 +171,8 @@ let PageSaving = {
 	
 	_cliReceipt(details=this.sessionDetails) {
 		return { sessionID: details.id, desktopSaved: details.desktopSaved || !!details.itemSaver?._savedToDesktop,
-			target: details.target || details.itemSaver?._saveTarget, items: (details.items || []).map(item => ({
+			target: details.target || details.itemSaver?._saveTarget,
+			sessionTags: details.sessionTags || [], sessionNote: details.sessionNote || '', items: (details.items || []).map(item => ({
 			connectorItemID: item.id, title: item.title, itemType: item.itemType,
 			attachments: Object.values(details.attachmentProgress || {})
 				.filter(a => a.parentItem === item.id).map(({parentItem, ...attachment}) => attachment)
@@ -568,7 +569,7 @@ let PageSaving = {
 		if (this._shouldReopenProgressWindow(translatorID, options, translator.itemType)) {
 			Zotero.debug(`PageSaving.onTranslate: Reopening popup`);
 			await Zotero.Messaging.sendMessage("progressWindow.show", [this.sessionDetails.id]);
-			return options.cliSave ? this._cliReceipt() : undefined;
+			return options.cliSave ? {...this._cliReceipt(), sessionReused: true} : undefined;
 		}
 
 		// Each save on multiple should be a new session (do not reopen the popup)
@@ -661,7 +662,7 @@ let PageSaving = {
 		if (this._shouldReopenProgressWindow(translatorID, options)) {
 			Zotero.debug(`PageSaving.onSaveAsWebpage: Reopening popup`);
 			await Zotero.Messaging.sendMessage("progressWindow.show", [this.sessionDetails.id]);
-			return options.cliSave ? this._cliReceipt() : undefined;
+			return options.cliSave ? {...this._cliReceipt(), sessionReused: true} : undefined;
 		}
 		
 		var sessionID = this._initSession(translatorID, options);
@@ -694,6 +695,8 @@ let PageSaving = {
 		);
 
 		this.sessionDetails.target = data.target;
+		this.sessionDetails.sessionTags = data.tags || [];
+		this.sessionDetails.sessionNote = data.note || '';
 		if (data.resaveAttachments && this.sessionDetails.itemSaver) {
 			Zotero.Messaging.sendMessage("progressWindow.show", [this.sessionDetails.id]);
 			await this.sessionDetails.itemSaver.saveAttachmentsToZotero(

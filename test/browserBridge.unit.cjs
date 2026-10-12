@@ -195,3 +195,37 @@ test('batch defers multiple-item selectors before invoking a save', async () => 
     const result=await c.Zotero.BrowserBridge.execute({...backgroundSave,defer_user_action:true});
     assert.equal(result.state,'needs_user_action');assert.equal(c.calls.length,0);assert.equal(c.removed,undefined);
 });
+
+test('destination uses the completed save session and confirms final library', async () => {
+    const c=backgroundContext();c.selected.targets.push({id:'L5',filesEditable:true});
+    const calls=[];
+    c.Zotero.Connector.callMethod=async(method,data)=>{
+        calls.push(method);
+        if(method==='updateSession') {
+            assert.equal(c.calls.length,1);assert.equal(data.sessionID,'session');assert.equal(data.target,'L5');
+            c.selected={...c.selected,libraryID:5,libraryName:'Destination'};
+        }
+        return c.selected;
+    };
+    const r=await c.Zotero.BrowserBridge.execute({...backgroundSave,destination:'L5'});
+    assert.equal(r.ok,true);assert.equal(r.target,'L5');assert.equal(r.libraryID,5);
+    assert.equal(r.destinationApplied,true);assert.equal(r.tab.closed,true);
+    assert.equal(calls.filter(x=>x==='updateSession').length,1);
+});
+test('destination failure preserves the receipt and tab', async () => {
+    const c=backgroundContext();c.selected.targets.push({id:'L5',filesEditable:true});
+    c.Zotero.Connector.callMethod=async method=>{if(method==='updateSession')throw Error('failed');return c.selected;};
+    const r=await c.Zotero.BrowserBridge.execute({...backgroundSave,destination:'L5'});
+    assert.equal(r.ok,false);assert.equal(r.destinationApplied,false);assert.equal(r.desktopSaved,true);
+    assert.equal(r.sessionID,'session');assert.equal(c.removed,undefined);
+});
+test('invalid destination is rejected before saving', async () => {
+    const c=backgroundContext();
+    await assert.rejects(c.Zotero.BrowserBridge.execute({...backgroundSave,destination:'L99'}),/writable destination/);
+    assert.equal(c.calls.length,0);assert.equal(c.openOptions,undefined);
+});
+test('destination does not move a reused save session', async () => {
+    const c=backgroundContext();c.selected.targets.push({id:'L5',filesEditable:true});c.receipt.sessionReused=true;
+    const r=await c.Zotero.BrowserBridge.execute({...backgroundSave,destination:'L5'});
+    assert.equal(r.ok,false);assert.equal(r.destinationApplied,false);assert.equal(c.removed,undefined);
+});

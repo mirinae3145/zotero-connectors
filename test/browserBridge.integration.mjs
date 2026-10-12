@@ -32,7 +32,7 @@ function makePDF() {
  return Buffer.from(data+`trailer<</Size ${objects.length+1}/Root 1 0 R>>\nstartxref\n${xref}\n%%EOF\n`);
 }
 const pdf=makePDF();
-let base, uploads=[], saves=[], cookieFetches=0, denyPDF=false;
+let base, uploads=[], saves=[], cookieFetches=0, denyPDF=false, selectedLibrary=4, moves=[];
 const fake=http.createServer(async(req,res)=>{
  const buffers=[];for await(const b of req)buffers.push(b); const bytes=Buffer.concat(buffers);
  res.setHeader('X-Zotero-Version','10.0.0');res.setHeader('Content-Type','application/json');
@@ -49,7 +49,8 @@ const fake=http.createServer(async(req,res)=>{
  }
  switch(route.pathname){
  case '/connector/ping':return send({prefs:{automaticSnapshots:false,downloadAssociatedFiles:true,automaticTags:true}});
- case '/connector/getSelectedCollection':return send({id:null,libraryID:4,libraryName:'Fixture Group',libraryEditable:true,filesEditable:true,editable:true,targets:[{id:'L4',name:'Fixture Group',level:0,filesEditable:true}]});
+ case '/connector/getSelectedCollection':return send({id:null,libraryID:selectedLibrary,libraryName:'Fixture Group',libraryEditable:true,filesEditable:true,editable:true,targets:[{id:'L4',name:'Fixture Group',level:0,filesEditable:true},{id:'L5',name:'Destination',level:0,filesEditable:true}]});
+ case '/connector/updateSession': {const data=JSON.parse(bytes); moves.push(data);selectedLibrary=Number(data.target.slice(1));return send({});}
  case '/connector/saveItems':saves.push(JSON.parse(bytes));return send({items:JSON.parse(bytes).items},201);
  case '/connector/saveAttachment':uploads.push(bytes);return send({});
  case '/connector/hasAttachmentResolvers':return send(false);
@@ -153,6 +154,12 @@ try{
  assert.equal(batch.ok,true);assert.equal(batch.data.completed.length,2);
  assert.ok(batch.data.completed.every(e=>e.result.tab.closed));
  assert.equal(batch.data.deferred.length,0);
+ const moved=await cli(['save','--url',base+'/paper?destination=1','--target','L4','--destination','L5','--background','--close-on-success','--timeout','30']);
+ assert.equal(moved.ok,true);assert.equal(moved.data.result.destinationApplied,true);
+ assert.equal(moved.data.result.target,'L5');assert.equal(moved.data.result.libraryID,5);
+ assert.equal(moved.data.result.tab.closed,true);assert.equal(moves.length,1);
+ assert.equal(moves[0].sessionID,moved.data.result.sessionID);
+ console.log('PASS: destination invokes native session update and confirms final target');
  console.log('PASS: CLI batch saves both PDFs and closes only generated tabs');
  console.log('PASS: background PDF save and cleanup, focus preservation, failed tab retention and explicit focus');
  console.log('PASS: actual translator, cookie-bound PDF, binary upload, repeat safety, failed-PDF receipt, ordinary toolbar save and URL-driven opening/saving');

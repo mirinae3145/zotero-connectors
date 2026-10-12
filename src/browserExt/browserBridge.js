@@ -113,7 +113,7 @@ Zotero.BrowserBridge = new class {
 		const target = selected.id ? `C${selected.id}` : `L${selected.libraryID}`;
 		if (request.action === 'targets') {
 			return { ok: true, selected: target, libraryID: selected.libraryID,
-				libraryName: selected.libraryName, targets: selected.targets };
+				libraryName: selected.libraryName, targets: selected.targets, capabilities: ['destination'] };
 		}
 		if (request.action !== 'save') throw new Error('Unknown browser action');
 		if (request.target && request.target !== target) {
@@ -121,6 +121,12 @@ Zotero.BrowserBridge = new class {
 		}
 		if (!selected.libraryEditable || selected.filesEditable === false) {
 			throw new Error('The selected Zotero target does not allow saving files');
+		}
+		if (request.destination) {
+			const destination = selected.targets?.find(t => t.id === request.destination);
+			if (!destination || destination.filesEditable !== true) {
+				throw new Error('Select a writable destination from browser targets; no save was started');
+			}
 		}
 		if (Zotero.Prefs.get('firstUse')) {
 			throw new Error('Complete the Connector first-use prompt with its toolbar button first');
@@ -156,11 +162,39 @@ Zotero.BrowserBridge = new class {
 		if (!saved || !saved.sessionID || !saved.desktopSaved) {
 			throw new Error('Connector returned no save receipt. The outcome is unknown; inspect Zotero before retrying');
 		}
-		const after = await Zotero.Connector.callMethod('getSelectedCollection', {});
-		const afterTarget = after.id ? `C${after.id}` : `L${after.libraryID}`;
-		const result = { ...saved, tab: page, selectedTarget: afterTarget, libraryID: after.libraryID, libraryName: after.libraryName };
+		let after = await Zotero.Connector.callMethod('getSelectedCollection', {});
+		let afterTarget = after.id ? `C${after.id}` : `L${after.libraryID}`;
+		let result = { ...saved, tab: page, selectedTarget: afterTarget, libraryID: after.libraryID, libraryName: after.libraryName };
 		if (afterTarget !== target || saved.target !== target) {
 			return { ...result, ok: false, error: 'Zotero target changed during saving; inspect the saved items before retrying' };
+		}
+		if (request.destination) {
+			result.destination = request.destination;
+			result.destinationApplied = false;
+			if (saved.sessionReused && saved.target !== request.destination) {
+				return {...result, ok: false, error: 'Connector session was already saved; inspect existing items before changing its destination'};
+			}
+			try {
+				if (saved.target !== request.destination) {
+					// Move the completed session through the popup's native path. Wait for
+					// attachments first so cross-library moves cannot race their uploads.
+					await Zotero.Connector.callMethod('updateSession', {
+						sessionID: saved.sessionID, target: request.destination,
+						tags: saved.sessionTags || [], note: saved.sessionNote || ''
+					});
+				}
+				after = await Zotero.Connector.callMethod('getSelectedCollection', {});
+				afterTarget = after.id ? `C${after.id}` : `L${after.libraryID}`;
+				result = {...result, selectedTarget: afterTarget, libraryID: after.libraryID, libraryName: after.libraryName};
+				if (afterTarget !== request.destination) {
+					return {...result, ok: false, error: 'Connector destination confirmation failed; inspect this session before retrying'};
+				}
+				result.target = request.destination;
+				result.destinationApplied = true;
+			}
+			catch (_) {
+				return {...result, ok: false, error: 'Connector destination update failed or is uncertain; items may remain at the initial target'};
+			}
 		}
 		// A translator can create metadata even when every PDF fails. Require a
 		// stored PDF for each returned item, not just a candidate URL or link.

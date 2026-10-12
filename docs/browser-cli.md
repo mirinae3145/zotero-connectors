@@ -118,3 +118,25 @@ The broker serializes commands, so a still-running save also queues `focus`/`ins
 
 Do not combine a second independent batch with an unresolved first batch on the same broker.
 Upgrade both forks together for batch preflight deferral.
+
+### Explicit save destination
+
+`browser save --url URL --destination TARGET_ID` and `browser batch URL1 URL2 --destination TARGET_ID`
+use the Connector popup's native `updateSession` operation after saving and attachment processing finish.
+Discover `L`/`C` desktop IDs with `browser targets`; these are not web API library IDs.
+The initial selected library must also allow file saving: the item is initially created there,
+then the same save session is moved to the requested library or collection, including its attachments.
+Zotero's visible selection changes. This is not an atomic save directly to the destination.
+`--target` remains an optional initial-selection guard; with batch `--destination`, it guards only
+its first paper, since the operation changes selection itself. Without `--destination`, it guards every paper.
+A batch requires at least one of these options.
+
+Upgrade the CLI/runtime, running broker and Connector together, then reload the extension.
+The CLI checks destination support before submitting a save. A confirmed result contains
+`destinationApplied: true` and `target` matching the requested destination.
+Movement failure/uncertainty preserves the session receipt and tab and stops the batch; inspect Zotero before retrying.
+A reused page session cannot be moved to a different destination by this command. The retained page popup
+may still show its original destination; inspect Zotero and the returned receipt instead of using that popup to retry or move it.
+Avoid editing the save popup while the automatic save/move is running.
+PDF validation still applies after movement; inspect the actual final-library item and PDF for correct content.
+The move uses native session identifiers, not a library search followed by a separate item move.
