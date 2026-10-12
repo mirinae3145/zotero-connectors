@@ -95,3 +95,26 @@ zotero-cli --json browser save --tab-id 42 --target L4
 
 Use the actual target and tab IDs returned in your environment.
 Update both forks together to use these options; older Connectors may ignore unsupported request fields.
+
+## Batch acquisition
+
+Run `browser batch URL1 URL2 ... --target TARGET_ID` for new publications after checking the intended library for duplicates.
+The caller must omit existing items with missing PDFs when its policy is to report them; the batch command does not query the library or repair existing items.
+The command saves sequentially in background tabs, with a default two-second interval between papers (`--interval`, 0.5–60 seconds).
+Confirmed saves close eligible request-created tabs using the same conservative cleanup rules as `save`.
+It never focuses tabs during the automatic pass.
+
+Completed challenge/loading results and detected multiple-item selectors are collected in `deferred`; terminal partial-save failures are collected in `failed`.
+After the pass, review the combined report and handle retained tabs together, using `focus` only when interaction is needed.
+Do not resubmit a partial save before checking its items and attachments.
+User-touched successful tabs remain open; the caller must not close them to force a completely empty success-tab list.
+
+The JSON envelope's `data` contains `completed`, `deferred`, `failed`, `unattempted` and `stopped`.
+Any incomplete batch returns `ok: false` and exit code 1 while preserving all outcomes.
+A timeout or unknown save outcome stops new submissions and retains the original job ID for `browser result`.
+A shared setup or destination failure also stops the pass rather than repeating it for every paper.
+An unexpected prompt inside an already-running translator/download may therefore stop a batch: this is not cancellation or a guarantee of fully unattended execution.
+The broker serializes commands, so a still-running save also queues `focus`/`inspect`; ask the user to visit that tab directly while recovering the original result.
+
+Do not combine a second independent batch with an unresolved first batch on the same broker.
+Upgrade both forks together for batch preflight deferral.

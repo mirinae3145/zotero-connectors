@@ -134,6 +134,10 @@ Zotero.BrowserBridge = new class {
 				error: 'Connector page needs attention or is still loading; resolve it in the browser, then save the same tab ID'};
 		}
 		const info = Zotero.Connector_Browser.getTabInfo(tab.id);
+		if (request.defer_user_action && info.translators?.[0]?.itemType === 'multiple') {
+			return {ok: false, tab: page, state: 'needs_user_action',
+				error: 'Connector item selection is required; deferred without starting a save'};
+		}
 		if (request.require_pdf !== false && !info.translators?.length && !info.isPDF) {
 			return {ok: false, tab: page, state: 'needs_user_action',
 				error: 'Connector found no publication translator or PDF; inspect login/access in this tab before saving'};

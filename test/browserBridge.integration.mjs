@@ -148,6 +148,12 @@ try{
  const focused=await cli(['focus','--tab-id',String(retainedID)]);
  assert.equal(focused.ok,true);
  assert.equal(await worker.evaluate(async id=> (await browser.tabs.get(id)).active,retainedID),true);
+ denyPDF=false;
+ const batch=await cli(['batch',base+'/paper?batch=1',base+'/paper?batch=2','--target','L4','--interval','0.5','--timeout','30']);
+ assert.equal(batch.ok,true);assert.equal(batch.data.completed.length,2);
+ assert.ok(batch.data.completed.every(e=>e.result.tab.closed));
+ assert.equal(batch.data.deferred.length,0);
+ console.log('PASS: CLI batch saves both PDFs and closes only generated tabs');
  console.log('PASS: background PDF save and cleanup, focus preservation, failed tab retention and explicit focus');
  console.log('PASS: actual translator, cookie-bound PDF, binary upload, repeat safety, failed-PDF receipt, ordinary toolbar save and URL-driven opening/saving');
 }catch(e){console.error(e);process.exitCode=1;}

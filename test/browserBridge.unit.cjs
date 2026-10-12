@@ -188,3 +188,10 @@ test('focus explicitly activates the requested tab and its window', async () => 
     assert.equal(result.ok,true);assert.equal(c.focusTab.id,9);assert.equal(c.focusTab.active,true);
     assert.equal(c.focusWindow.id,2);assert.equal(c.focusWindow.focused,true);assert.equal(c.calls.length,0);
 });
+
+test('batch defers multiple-item selectors before invoking a save', async () => {
+    const c=backgroundContext();
+    c.Zotero.Connector_Browser.getTabInfo=()=>({detectionDone:true,translators:[{label:'Search results',itemType:'multiple'}]});
+    const result=await c.Zotero.BrowserBridge.execute({...backgroundSave,defer_user_action:true});
+    assert.equal(result.state,'needs_user_action');assert.equal(c.calls.length,0);assert.equal(c.removed,undefined);
+});
