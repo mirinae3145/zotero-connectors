@@ -255,3 +255,31 @@ test('opening a detected page does not wait for a publication translator', async
     const result=await c.Zotero.BrowserBridge.execute({action:'open',url:'https://journal.example/article'});
     assert.equal(result.ok,true);assert.equal(ticks,0);
 });
+
+
+test('challenge appearing during the final target check prevents saving', async () => {
+    const c = context(); let checks = 0; let title = 'Paper';
+    c.browser.tabs.get = async id => ({id, url:'https://journal.example/article', status:'complete', title});
+    c.Zotero.Connector.callMethod = async () => {
+        if (++checks === 2) title = 'Just a moment...';
+        return c.selected;
+    };
+    const result = await c.Zotero.BrowserBridge.execute({action:'save', tab_id:1, ready_timeout:0.5});
+    assert.equal(c.calls.length, 0, 'toolbar save must not run while challenge is active');
+    assert.equal(result.ok, false);
+    assert.equal(result.state, 'needs_user_action');
+});
+
+test('detection reset during the final target check prevents saving', async () => {
+    const c = context(); let checks = 0; let detecting = false;
+    c.Zotero.Connector.callMethod = async () => {
+        if (++checks === 2) detecting = true;
+        return c.selected;
+    };
+    c.Zotero.Connector_Browser.getTabInfo = () => detecting
+        ? {detectionDone:false, translators:[]} : {detectionDone:true, translators:[{label:'Fixture'}]};
+    const result = await c.Zotero.BrowserBridge.execute({action:'save', tab_id:1});
+    assert.equal(c.calls.length, 0);
+    assert.equal(result.ok, false);
+    assert.equal(result.state, 'loading');
+});

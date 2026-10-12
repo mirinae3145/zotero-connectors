@@ -141,10 +141,20 @@ Zotero.BrowserBridge = new class {
 		if (Zotero.Prefs.get('firstUse')) {
 			throw new Error('Complete the Connector first-use prompt with its toolbar button first');
 		}
-		const tab = await this._openOrGet(request, context);
+		let tab = await this._openOrGet(request, context);
+		if (!/^https?:/.test(tab.url)) throw new Error('Select an HTTP(S) publication tab');
+		// These asynchronous checks can outlive the readiness observation. Read
+		// the tab again afterwards so a new challenge/loading state cannot be
+		// passed to the toolbar with an earlier ready snapshot.
+		const beforeSave = await Zotero.Connector.callMethod('getSelectedCollection', {});
+		const beforeTarget = beforeSave.id ? `C${beforeSave.id}` : `L${beforeSave.libraryID}`;
+		tab = await browser.tabs.get(tab.id);
 		if (!/^https?:/.test(tab.url)) throw new Error('Select an HTTP(S) publication tab');
 		const page = this._tabStatus(tab);
 		context.savedURL = tab.url;
+		if (beforeTarget !== target) {
+			return {ok:false,tab:page,error:'Zotero target changed while the publication loaded; no save was started'};
+		}
 		if (page.state !== 'ready') {
 			return {ok: false, tab: page, state: page.state,
 				error: 'Connector page needs attention or is still loading; resolve it in the browser, then save the same tab ID'};
@@ -160,13 +170,6 @@ Zotero.BrowserBridge = new class {
 		}
 		if (!info.detectionDone && !info.isPDF && !info.uninjectable) {
 			throw new Error('Connector detection is not ready; reload the publication tab and retry');
-		}
-		// Opening a URL and publisher verification may take time. Recheck the
-		// destination immediately before invoking the write, not only before navigation.
-		const beforeSave = await Zotero.Connector.callMethod('getSelectedCollection', {});
-		const beforeTarget = beforeSave.id ? `C${beforeSave.id}` : `L${beforeSave.libraryID}`;
-		if (beforeTarget !== target) {
-			return {ok:false,tab:page,error:'Zotero target changed while the publication loaded; no save was started'};
 		}
 		const saved = await Zotero.Connector_Browser.onZoteroButtonElementClick(tab, { cliSave: true });
 		if (!saved || !saved.sessionID || !saved.desktopSaved) {

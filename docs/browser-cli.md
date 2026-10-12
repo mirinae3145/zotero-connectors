@@ -23,6 +23,9 @@ It neither exports cookies nor accepts arbitrary JavaScript commands.
 `browser open URL` and `browser inspect --tab-id ID` support inspecting access or login before saving.
 The Connector waits up to 30 seconds for detection or a transient challenge to clear.
 A remaining common challenge-page title stops the save with `needs_user_action`; a detection timeout returns `loading`.
+After the final Zotero target lookup, the Connector rechecks the current tab and detection state before invoking save.
+A challenge or loading state appearing during that lookup preserves the tab and starts no save.
+Challenge detection uses page-title heuristics; a CAPTCHA that retains an ordinary publication title can still go undetected.
 Resolve a login or CAPTCHA in the paired browser, then save the same tab ID.
 This does not automatically solve CAPTCHAs or reuse another browser profile's authentication.
 Tab listings omit URL query strings and fragments.
