@@ -70,6 +70,15 @@
 		<!-- React Component -->
 		<div id="content-proxies" class="content"></div>
 		<div id="content-advanced" class="content">
+            <div class="group">
+                <div class="group-title">Browser CLI</div>
+                <p>Allow your local zotero-cli bridge to use this browser's Zotero save button.</p>
+                <label><input type="checkbox" id="browser-bridge-enabled"> Enable Browser CLI</label>
+                <p><label>Local port <input type="number" id="browser-bridge-port" value="23120" min="1" max="65535"></label></p>
+                <p><label>Pairing token <input type="password" id="browser-bridge-token" autocomplete="off"></label></p>
+                <button id="browser-bridge-apply">Apply</button>
+                <span id="browser-bridge-status" role="status"></span>
+            </div>
 			<div class="group">
 				<div class="group-title" data-l10n-id="preferences_reportErrors">Report Errors</div>
 				<div class="group-content">

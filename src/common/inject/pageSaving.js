@@ -169,7 +169,24 @@ let PageSaving = {
 		return items;
 	},
 	
+	_cliReceipt() {
+		const details = this.sessionDetails;
+		return { sessionID: details.id, desktopSaved: details.desktopSaved || !!details.itemSaver?._savedToDesktop,
+			target: details.target || details.itemSaver?._saveTarget, items: (details.items || []).map(item => ({
+			connectorItemID: item.id, title: item.title, itemType: item.itemType,
+			attachments: Object.values(details.attachmentProgress || {})
+				.filter(a => a.parentItem === item.id).map(({parentItem, ...attachment}) => attachment)
+		})) };
+	},
+
 	_onAttachmentProgress(attachment, progress) {
+		const details = PageSaving.sessionDetails;
+		if (!details.attachmentProgress) details.attachmentProgress = {};
+		details.attachmentProgress[attachment.id] = {
+			connectorAttachmentID: attachment.id, parentItem: attachment.parentItem,
+			title: attachment.title, mimeType: attachment.mimeType,
+			stored: progress === 100 && attachment.snapshot !== false, progress
+		};
 		const sessionID = PageSaving.sessionDetails.id;
 		Zotero.Messaging.sendMessage(
 			"progressWindow.itemProgress",
@@ -294,6 +311,7 @@ let PageSaving = {
 		this.sessionDetails.items = items;
 		let itemType = translators[0].itemType;
 		let itemSaver = new Zotero.ItemSaver({ sessionID, itemType, baseURI: document.location.href, proxy });
+		itemSaver._desktopOnly = !!this.sessionDetails.saveOptions?.cliSave;
 		this.sessionDetails.itemSaver = itemSaver;
 		return itemSaver.saveItems(items, PageSaving._onAttachmentProgress, onItemsSaved)
 	},
@@ -309,6 +327,11 @@ let PageSaving = {
 	async saveAsWebpage({ title=document.title, snapshot: saveSnapshot=true } = {}) {
 		var result = await Zotero.Inject.checkActionToServer();
 		if (!result) return;
+
+		if (this.sessionDetails.saveOptions?.cliSave) {
+			const selected = await Zotero.Connector.callMethod('getSelectedCollection', {});
+			this.sessionDetails.target = selected.id ? `C${selected.id}` : `L${selected.libraryID}`;
+		}
 
 		var isTextLike = document.contentType.startsWith('text')
 			|| document.contentType.includes('html');
@@ -348,6 +371,7 @@ let PageSaving = {
 
 		try {
 			var result = await Zotero.Connector.callMethod("saveSnapshot", data);
+			this.sessionDetails.desktopSaved = true;
 			Zotero.Messaging.sendMessage("progressWindow.sessionCreated", { sessionID });
 			items[0] = { ...items[0], progress: 100, itemsLoaded: 1 };
 			Zotero.Messaging.sendMessage("progressWindow.itemProgress", items[0]);
@@ -365,7 +389,7 @@ let PageSaving = {
 			return result;
 		} catch (e) {
 			// Client unavailable
-			if (e.status === 0) {
+			if (e.status === 0 && !this.sessionDetails.saveOptions?.cliSave) {
 				let itemSaver = new Zotero.ItemSaver({});
 				this.sessionDetails.itemSaver = itemSaver;
 				let result = await itemSaver.saveAsWebpage();
@@ -477,6 +501,12 @@ let PageSaving = {
 		try {
 			await Zotero.ItemSaver.fetchAttachmentSafari(standaloneAttachment);
 			let { canRecognize } = await Zotero.ItemSaver.saveStandaloneAttachmentToZotero(standaloneAttachment, sessionID)
+			this.sessionDetails.desktopSaved = true;
+			this.sessionDetails.items = [{ id: 1, title, itemType: 'attachment' }];
+			this.sessionDetails.attachmentProgress = { standalone: {
+				connectorAttachmentID: null, parentItem: 1, title,
+				mimeType: document.contentType, stored: true, progress: 100
+			} };
 			Zotero.Messaging.sendMessage("progressWindow.sessionCreated", { sessionID });
 			progressItem.progress = 100;
 			Zotero.Messaging.sendMessage("progressWindow.itemProgress", { ...progressItem, ...{ progress: 100 } });
@@ -501,7 +531,7 @@ let PageSaving = {
 			});
 		} catch (e) {
 			// Client unavailable
-			if (e.status === 0) {
+			if (e.status === 0 && !this.sessionDetails.saveOptions?.cliSave) {
 				Zotero.Messaging.sendMessage("progressWindow.itemProgress", { ...progressItem, ...{ progress: 0 } });
 				await Zotero.ItemSaver.saveAttachmentToServer(standaloneAttachment);
 				Zotero.Messaging.sendMessage("progressWindow.itemProgress", { ...progressItem, ...{ progress: 100 } });
@@ -538,7 +568,8 @@ let PageSaving = {
 		// In some cases, we just reopen the popup instead of saving again
 		if (this._shouldReopenProgressWindow(translatorID, options, translator.itemType)) {
 			Zotero.debug(`PageSaving.onTranslate: Reopening popup`);
-			return Zotero.Messaging.sendMessage("progressWindow.show", [this.sessionDetails.id]);
+			await Zotero.Messaging.sendMessage("progressWindow.show", [this.sessionDetails.id]);
+			return options.cliSave ? this._cliReceipt() : undefined;
 		}
 
 		// Each save on multiple should be a new session (do not reopen the popup)
@@ -580,7 +611,7 @@ let PageSaving = {
 			}
 			let items = await this.translateAndSave(translators, options.fallbackOnFailure);
 			Zotero.Messaging.sendMessage("progressWindow.done", [true]);
-			return items;
+			return options.cliSave ? this._cliReceipt() : items;
 		} catch (e) {
 			Zotero.logError(e);
 			// Clear session details on failure, so another save click tries again
@@ -605,6 +636,7 @@ let PageSaving = {
 			else {
 				Zotero.Messaging.sendMessage("progressWindow.done", [false]);
 			}
+			if (options.cliSave) throw e;
 		}
 	},
 
@@ -627,11 +659,13 @@ let PageSaving = {
 		// In some cases, we just reopen the popup instead of saving again
 		if (this._shouldReopenProgressWindow(translatorID, options)) {
 			Zotero.debug(`PageSaving.onSaveAsWebpage: Reopening popup`);
-			return Zotero.Messaging.sendMessage("progressWindow.show", [this.sessionDetails.id]);
+			await Zotero.Messaging.sendMessage("progressWindow.show", [this.sessionDetails.id]);
+			return options.cliSave ? this._cliReceipt() : undefined;
 		}
 		
 		var sessionID = this._initSession(translatorID, options);
-		return await this.saveAsWebpage({sessionID, title, snapshot: options.snapshot, resave: options.resave});
+		const saved = await this.saveAsWebpage({sessionID, title, snapshot: options.snapshot, resave: options.resave});
+		return options.cliSave ? this._cliReceipt() : saved;
 	},
 
 	/**
@@ -658,6 +692,7 @@ let PageSaving = {
 			}
 		);
 
+		this.sessionDetails.target = data.target;
 		if (data.resaveAttachments && this.sessionDetails.itemSaver) {
 			Zotero.Messaging.sendMessage("progressWindow.show", [this.sessionDetails.id]);
 			await this.sessionDetails.itemSaver.saveAttachmentsToZotero(

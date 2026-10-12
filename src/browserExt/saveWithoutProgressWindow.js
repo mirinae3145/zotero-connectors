@@ -71,8 +71,9 @@ Zotero.WebRequestIntercept.addListener('headersReceived', function(details) {
 	}, 100);
 });
 
-Zotero.Utilities.saveWithoutProgressWindow = async function (tab, frameId) {
+Zotero.Utilities.saveWithoutProgressWindow = async function (tab, frameId, options={}) {
 	let url = tab.url;
+	const selected = options.cliSave ? await Zotero.Connector.callMethod('getSelectedCollection', {}) : null;
 	let tabInfo = Zotero.Connector_Browser.getTabInfo(tab.id);
 	const pdf = tabInfo.isPDF;
 	// Get URL from iframe
@@ -111,7 +112,7 @@ Zotero.Utilities.saveWithoutProgressWindow = async function (tab, frameId) {
 			await Zotero.ItemSaver.saveStandaloneAttachmentToZotero(data, data.sessionID, tab);
 		}
 		catch (e) {
-			if (e.status !== 0 || !pdf) throw e;
+			if (e.status !== 0 || !pdf || options.cliSave) throw e;
 			data.linkMode = 'imported_url';
 			await Zotero.ItemSaver.saveAttachmentToServer(data, tab);
 		}
@@ -127,9 +128,16 @@ Zotero.Utilities.saveWithoutProgressWindow = async function (tab, frameId) {
 			tabId:tab.id,
 			title: Zotero.getString('browserAction_saved')
 		});
+		if (options.cliSave) return { sessionID: data.sessionID, desktopSaved: true,
+			target: selected.id ? `C${selected.id}` : `L${selected.libraryID}`, items: [{
+			connectorItemID: null, title: data.title, itemType: 'attachment',
+			attachments: [{ connectorAttachmentID: null, title: data.title,
+				mimeType: data.mimeType, stored: true, progress: 100 }]
+		}] };
 		tabInfo.isPDF = false;
 	
 	} catch (e) {
+		if (options.cliSave) throw e;
 		if (e.status !== 0) {
 			Zotero.logError(e);
 		}

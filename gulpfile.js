@@ -159,6 +159,7 @@ if (!argv.p) {
 }
 var backgroundIncludeBrowserExt = ['browser-polyfill.js'].concat(backgroundInclude, [
 	'hostPermissions.js',
+	'browserBridge.js',
 	'webRequestIntercept.js',
 	'contentTypeHandler.js',
 	'saveWithoutProgressWindow.js',

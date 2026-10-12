@@ -243,7 +243,7 @@ Zotero.Connector_Browser = new function() {
 		}
 		
 		var isPDF = contentType == 'application/pdf';
-		_tabInfo[tab.id] = Object.assign(_tabInfo[tab.id] || {}, {translators, instanceID, isPDF});
+		_tabInfo[tab.id] = Object.assign(_tabInfo[tab.id] || {}, {translators, instanceID, isPDF, detectionDone: true});
 		
 		Zotero.Connector_Browser._updateExtensionUI(tab);
 	}
@@ -324,8 +324,8 @@ Zotero.Connector_Browser = new function() {
 		_incompatibleVersionMessageShown = true;
 	}
 
-	this.onZoteroButtonElementClick = function(tab) {
-		return _browserAction(tab);
+	this.onZoteroButtonElementClick = function(tab, options={}) {
+		return _browserAction(tab, options);
 	}
 	
 	/**
@@ -1139,7 +1139,7 @@ Zotero.Connector_Browser = new function() {
 		return true;
 	}
 
-	async function _browserAction(tab) {
+	async function _browserAction(tab, options={}) {
 		const shouldContinue = await Zotero.HostPermissions.checkChromiumActionPermissions(tab);
 		if (!shouldContinue) {
 			return;
@@ -1160,21 +1160,21 @@ Zotero.Connector_Browser = new function() {
 			});
 		}
 		else if(tabInfo.translators && tabInfo.translators.length) {
-			Zotero.Connector_Browser.saveWithTranslator(tab, 0, {fallbackOnFailure: true});
+			return Zotero.Connector_Browser.saveWithTranslator(tab, 0, {fallbackOnFailure: true, ...options});
 		}
 		else {
 			if (tabInfo.isPDF) {
-				Zotero.Connector_Browser.saveAsWebpage(
+				return Zotero.Connector_Browser.saveAsWebpage(
 					tab,
 					tabInfo.frameId,
 					{
-						snapshot: true
+						snapshot: true, ...options
 					}
 				);
 			} else {
 				let withSnapshot = Zotero.Connector.isOnline ? Zotero.Connector.prefs.automaticSnapshots :
 					Zotero.Prefs.get('automaticSnapshots');
-				Zotero.Connector_Browser.saveAsWebpage(tab, 0, { snapshot: withSnapshot });
+				return Zotero.Connector_Browser.saveAsWebpage(tab, 0, { snapshot: withSnapshot, ...options });
 			}
 		}
 	}
@@ -1208,7 +1208,7 @@ Zotero.Connector_Browser = new function() {
 	this.saveAsWebpage = async function(tab, frameId, options={}) {
 		let tabInfo = this.getTabInfo(tab.id);
 		if (tabInfo.uninjectable) {
-			return Zotero.Utilities.saveWithoutProgressWindow(tab, frameId);
+			return Zotero.Utilities.saveWithoutProgressWindow(tab, frameId, options);
 		}
 	
 		if (tab.id != -1) {

@@ -96,7 +96,7 @@ ItemSaver.prototype = {
 			return await this._saveToZotero(items, attachmentCallback, itemsDoneCallback);
 		}
 		catch (e) {
-			if (e.status == 0) {
+			if (e.status == 0 && !this._desktopOnly) {
 				return this._saveToServer(items, attachmentCallback, itemsDoneCallback);
 			}
   			throw e;
@@ -187,6 +187,8 @@ ItemSaver.prototype = {
 		Zotero.Messaging.sendMessage("progressWindow.sessionCreated", { sessionID: this._sessionID });
 		
 		const response = await Zotero.Connector.callMethod("getSelectedCollection", {})
+		this._saveTarget = response.id ? `C${response.id}` : `L${response.libraryID}`;
+		this._savedToDesktop = true;
 		if (response.filesEditable) {
 			await this.saveAttachmentsToZotero(attachmentCallback);
 		}
