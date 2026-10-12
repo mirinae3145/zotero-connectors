@@ -34,7 +34,7 @@ Zotero.BrowserBridge = new class {
 		}
 		for (let n = 0; n < 120; n++) {
 			tab = await browser.tabs.get(tab.id);
-			if (/^https?:/.test(tab.url) && this._tabStatus(tab).state !== 'loading') return tab;
+			if (/^https?:/.test(tab.url) && this._tabStatus(tab).state === 'ready') return tab;
 			await new Promise(resolve => setTimeout(resolve, 250));
 		}
 		return tab;
@@ -90,6 +90,13 @@ Zotero.BrowserBridge = new class {
 		}
 		if (!info.detectionDone && !info.isPDF && !info.uninjectable) {
 			throw new Error('Connector detection is not ready; reload the publication tab and retry');
+		}
+		// Opening a URL and publisher verification may take time. Recheck the
+		// destination immediately before invoking the write, not only before navigation.
+		const beforeSave = await Zotero.Connector.callMethod('getSelectedCollection', {});
+		const beforeTarget = beforeSave.id ? `C${beforeSave.id}` : `L${beforeSave.libraryID}`;
+		if (beforeTarget !== target) {
+			return {ok:false,tab:page,error:'Zotero target changed while the publication loaded; no save was started'};
 		}
 		const saved = await Zotero.Connector_Browser.onZoteroButtonElementClick(tab, { cliSave: true });
 		if (!saved || !saved.sessionID || !saved.desktopSaved) {

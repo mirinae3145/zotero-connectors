@@ -40,8 +40,9 @@ const fake=http.createServer(async(req,res)=>{
  const send=(x,status=200)=>{res.statusCode=status;res.end(JSON.stringify(x));};
  if(route.pathname==='/paper'){
   res.setHeader('Content-Type','text/html');res.setHeader('Set-Cookie','access=granted; Path=/; SameSite=Lax');
-  res.end(`<html><head><title>Browser bridge integration paper</title><meta name="citation_title" content="Browser bridge integration paper"><meta name="citation_author" content="Fixture Author"><meta name="citation_date" content="2026"><meta name="citation_journal_title" content="Bridge Test"><meta name="citation_pdf_url" content="${base}/paper.pdf"></head><body>Browser-only PDF</body></html>`);return;
+  res.end(`<html><head><title>Browser bridge integration paper</title><meta name="citation_title" content="Browser bridge integration paper"><meta name="citation_author" content="Fixture Author"><meta name="citation_date" content="2026"><meta name="citation_journal_title" content="Bridge Test"><meta name="citation_pdf_url" content="${base}/paper.pdf"></head><body>Browser-only PDF<iframe src="${base}/frame"></iframe></body></html>`);return;
  }
+ if(route.pathname==='/frame'){res.setHeader('Content-Type','text/html');res.end('<html><body>Embedded frame</body></html>');return;}
  if(route.pathname==='/paper.pdf'){
   if(denyPDF || !req.headers.cookie?.includes('access=granted'))return send({error:'browser cookie required'},403);
   cookieFetches++;res.setHeader('Content-Type','application/pdf');res.end(pdf);return;
@@ -96,6 +97,18 @@ try{
   }
   throw Error('translator detection timed out: '+JSON.stringify(Zotero.Connector_Browser.getTabInfo(id))+' errors='+JSON.stringify(await Zotero.Errors.getErrors()));
  },tabID);
+ await worker.evaluate(async id=>{
+  const frames=await browser.webNavigation.getAllFrames({tabId:id});
+  for(const frame of frames.filter(f=>f.frameId!==0)) {
+   await browser.scripting.executeScript({target:{tabId:id,frameIds:[frame.frameId]},func:()=>{
+    // Unrelated extension listeners can acknowledge a broadcast before the
+    // selected translator frame finishes its asynchronous save.
+    chrome.runtime.onMessage.addListener((message,_sender,respond)=>{
+     if(message[0]==='translate'){respond(null);return false;}
+    });
+   }});
+  }
+ },tabID);
  for(let n=0;n<20;n++){const s=await cli(['status']);if(s.data?.connected)break;await new Promise(r=>setTimeout(r,200));}
  const result=await cli(['save','--tab-id',String(tabID),'--target','L4','--timeout','30']);
  console.log(JSON.stringify(result));
@@ -112,8 +125,9 @@ try{
  denyPDF=false;
  await page.reload();
  await worker.evaluate(async id=>{for(let n=0;n<100;n++){if(Zotero.Connector_Browser.getTabInfo(id).translators?.length)return;await new Promise(r=>setTimeout(r,100));}throw Error('redetection timeout');},tabID);
- const manual=await worker.evaluate(async id=>Zotero.Connector_Browser.onZoteroButtonElementClick(await browser.tabs.get(id)),tabID);
- assert.ok(Array.isArray(manual));assert.equal(uploads.length,2);assert.equal(saves.length,3);
+ await worker.evaluate(async id=>Zotero.Connector_Browser.onZoteroButtonElementClick(await browser.tabs.get(id)),tabID);
+ for(let n=0;n<100 && (uploads.length<2 || saves.length<3);n++) await new Promise(r=>setTimeout(r,100));
+ assert.equal(uploads.length,2);assert.equal(saves.length,3);
  const opened=await cli(['open',base+'/paper?open=1']);
  assert.equal(opened.ok,true);assert.equal(opened.data.result.tab.state,'ready');
  const inspected=await cli(['inspect','--tab-id',String(opened.data.result.tab.id)]);

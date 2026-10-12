@@ -21,7 +21,8 @@ It polls an authenticated loopback broker and only supports opening or inspectin
 It neither exports cookies nor accepts arbitrary JavaScript commands.
 `browser save --url URL` opens the publication without requiring the user to create a tab.
 `browser open URL` and `browser inspect --tab-id ID` support inspecting access or login before saving.
-Common challenge-page titles stop the save with `needs_user_action`; a detection timeout returns `loading`.
+The Connector waits up to 30 seconds for detection or a transient challenge to clear.
+A remaining common challenge-page title stops the save with `needs_user_action`; a detection timeout returns `loading`.
 Resolve a login or CAPTCHA in the paired browser, then save the same tab ID.
 This does not automatically solve CAPTCHAs or reuse another browser profile's authentication.
 Tab listings omit URL query strings and fragments.

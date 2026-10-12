@@ -157,8 +157,8 @@ let PageSaving = {
 	 * option "Create Zotero Item and Note from Selection"
 	 * @param items
 	 */	
-	_processNote(items) {
-		const saveOptions = this.sessionDetails.saveOptions;
+	_processNote(items, sessionDetails=this.sessionDetails) {
+		const saveOptions = sessionDetails.saveOptions;
 		if (saveOptions && saveOptions.note && items.length == 1) {
 			if (items[0].notes) {
 				items[0].notes.push({note: saveOptions.note})
@@ -169,8 +169,7 @@ let PageSaving = {
 		return items;
 	},
 	
-	_cliReceipt() {
-		const details = this.sessionDetails;
+	_cliReceipt(details=this.sessionDetails) {
 		return { sessionID: details.id, desktopSaved: details.desktopSaved || !!details.itemSaver?._savedToDesktop,
 			target: details.target || details.itemSaver?._saveTarget, items: (details.items || []).map(item => ({
 			connectorItemID: item.id, title: item.title, itemType: item.itemType,
@@ -179,15 +178,14 @@ let PageSaving = {
 		})) };
 	},
 
-	_onAttachmentProgress(attachment, progress) {
-		const details = PageSaving.sessionDetails;
+	_onAttachmentProgress(attachment, progress, error, details=PageSaving.sessionDetails) {
 		if (!details.attachmentProgress) details.attachmentProgress = {};
 		details.attachmentProgress[attachment.id] = {
 			connectorAttachmentID: attachment.id, parentItem: attachment.parentItem,
 			title: attachment.title, mimeType: attachment.mimeType,
 			stored: progress === 100 && attachment.snapshot !== false, progress
 		};
-		const sessionID = PageSaving.sessionDetails.id;
+		const sessionID = details.id;
 		Zotero.Messaging.sendMessage(
 			"progressWindow.itemProgress",
 			{
@@ -208,7 +206,8 @@ let PageSaving = {
 	 * @returns {Promise<*>}
 	 */
 	async translateAndSave(translators, fallbackOnFailure = false) {
-		const sessionID = this.sessionDetails.id;
+		const sessionDetails = this.sessionDetails;
+		const sessionID = sessionDetails.id;
 		let itemsTotal = 0;
 		let itemsSaved = 0;
 		
@@ -224,7 +223,7 @@ let PageSaving = {
 
 				// If items were selected, reopen the save popup
 				if (returnItems && !Zotero.Utilities.isEmpty(returnItems)) {
-					let sessionID = this.sessionDetails.id;
+					let sessionID = sessionDetails.id;
 					// Record how many items are being saved so that progress window can know
 					// when all top-level items are loaded
 					itemsTotal = Object.keys(returnItems).length;
@@ -307,13 +306,13 @@ let PageSaving = {
 			proxy = await translate.getProxy();
 			if (proxy) proxy = new Zotero.Proxy(proxy);
 		}
-		items = this._processNote(items);
-		this.sessionDetails.items = items;
+		items = this._processNote(items, sessionDetails);
+		sessionDetails.items = items;
 		let itemType = translators[0].itemType;
 		let itemSaver = new Zotero.ItemSaver({ sessionID, itemType, baseURI: document.location.href, proxy });
-		itemSaver._desktopOnly = !!this.sessionDetails.saveOptions?.cliSave;
-		this.sessionDetails.itemSaver = itemSaver;
-		return itemSaver.saveItems(items, PageSaving._onAttachmentProgress, onItemsSaved)
+		itemSaver._desktopOnly = !!sessionDetails.saveOptions?.cliSave;
+		sessionDetails.itemSaver = itemSaver;
+		return itemSaver.saveItems(items, (attachment, progress, error) => PageSaving._onAttachmentProgress(attachment, progress, error, sessionDetails), onItemsSaved)
 	},
 
 	/**
@@ -578,6 +577,8 @@ let PageSaving = {
 		}
 
 		const sessionID = this._initSession(translatorID, options);
+		// Publisher DOM updates can replace page state while attachment saving awaits.
+		const sessionDetails = this.sessionDetails;
 
 		// If we're likely to show the Select Items window, delay the opening of the
 		// popup until we've had a chance to hide it (which happens in the 'select'
@@ -611,7 +612,7 @@ let PageSaving = {
 			}
 			let items = await this.translateAndSave(translators, options.fallbackOnFailure);
 			Zotero.Messaging.sendMessage("progressWindow.done", [true]);
-			return options.cliSave ? this._cliReceipt() : items;
+			return options.cliSave ? this._cliReceipt(sessionDetails) : items;
 		} catch (e) {
 			Zotero.logError(e);
 			// Clear session details on failure, so another save click tries again

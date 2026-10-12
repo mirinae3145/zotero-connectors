@@ -243,7 +243,7 @@ Zotero.Connector_Browser = new function() {
 		}
 		
 		var isPDF = contentType == 'application/pdf';
-		_tabInfo[tab.id] = Object.assign(_tabInfo[tab.id] || {}, {translators, instanceID, isPDF, detectionDone: true});
+		_tabInfo[tab.id] = Object.assign(_tabInfo[tab.id] || {}, {translators, instanceID, isPDF, detectionDone: true, translationFrameId: frameId});
 		
 		Zotero.Connector_Browser._updateExtensionUI(tab);
 	}
@@ -1191,8 +1191,10 @@ Zotero.Connector_Browser = new function() {
 		let tabInfo = this.getTabInfo(tab.id);
 		var translator = tabInfo.translators[i];
 		
-		// Set frameId to null - send message to all frames
-		// There is code to figure out which frame should translate with instanceID.
+		// CLI callers need the selected translator frame's completed response.
+		// Broadcasting lets an unrelated iframe acknowledge first and hide the
+		// save result, even while the actual translator is still saving.
+		// Preserve the existing broadcast behavior for ordinary toolbar clicks.
 		return Zotero.Messaging.sendMessage(
 			"translate",
 			[
@@ -1201,7 +1203,7 @@ Zotero.Connector_Browser = new function() {
 				options
 			],
 			tab,
-			null
+			options.cliSave ? (tabInfo.translationFrameId ?? 0) : null
 		);
 	}
 	

@@ -56,7 +56,7 @@ test('page receipts track failed, stored and linked attachments separately', () 
     const page = c.Zotero.PageSaving;
     page.sessionDetails = {id: 's', items: [{id: 'p', title: 'Paper'}]};
     for (const [id, progress, snapshot] of [['failed', false, true], ['stored', 100, true], ['linked', 100, false]]) {
-        page._onAttachmentProgress({id, parentItem: 'p', mimeType: 'application/pdf', snapshot}, progress);
+        page._onAttachmentProgress({id, parentItem: 'p', mimeType: 'application/pdf', snapshot}, progress, progress===false ? 'download failed' : undefined);
     }
     const attachments = page._cliReceipt().items[0].attachments;
     assert.equal(attachments.find(a => a.connectorAttachmentID === 'stored').stored, true);
@@ -88,4 +88,42 @@ test('CAPTCHA title is returned before creating any library item', async () => {
     c.browser.tabs.get = async id => ({id,url:'https://journal.example/article',title:'Just a moment...',status:'complete'});
     const result = await c.Zotero.BrowserBridge.execute({action:'save',tab_id:1});
     assert.equal(result.ok,false);assert.equal(result.state,'needs_user_action');assert.equal(c.calls.length,0);
+});
+
+test('a publisher re-detection during saving does not erase the CLI receipt', async () => {
+    const c = context();
+    Object.assign(c.Zotero, {
+        Messaging:{sendMessage:async()=>undefined},
+        Inject:{checkActionToServer:async()=>true},
+        Utilities:{randomString:()=> 'stable-session'},
+        Promise:{delay:async()=>{}},debug(){},logError(){}
+    });
+    c.document={location:{href:'https://journal.example/article'}};
+    vm.runInContext(fs.readFileSync(path.join(root,'src/common/inject/pageSaving.js'),'utf8'),c);
+    const page=c.Zotero.PageSaving;
+    page.translators=[{translatorID:'t',label:'Fixture',itemType:'journalArticle'}];
+    page.translateAndSave=async function(){
+        const session=this.sessionDetails;
+        session.items=[{id:'parent',title:'Paper'}];
+        session.desktopSaved=true;session.target='L4';
+        session.attachmentProgress={pdf:{parentItem:'parent',mimeType:'application/pdf',stored:true}};
+        this.sessionDetails={}; // asynchronous publisher re-detection replaced the active page state
+        return session.items;
+    };
+    const result=await page.onTranslate('t',{cliSave:true});
+    assert.equal(result.sessionID,'stable-session');
+    assert.equal(result.items[0].attachments[0].stored,true);
+});
+
+test('transient challenge can clear before requesting user intervention', async () => {
+    const c=context();let reads=0;
+    c.browser.tabs.get=async id=>({id,url:'https://journal.example/article',status:'complete',title:++reads<3?'Just a moment...':'Paper'});
+    const result=await c.Zotero.BrowserBridge.execute({action:'save',tab_id:1});
+    assert.equal(result.ok,true);assert.ok(reads>=3);
+});
+test('destination change while opening a URL stops before writing', async () => {
+    const c=context();
+    c.browser.tabs.create=async()=>{c.selected={...c.selected,libraryID:1};return {id:9};};
+    const result=await c.Zotero.BrowserBridge.execute({action:'save',url:'https://journal.example/article'});
+    assert.equal(result.ok,false);assert.equal(c.calls.length,0);
 });
