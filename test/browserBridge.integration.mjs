@@ -114,6 +114,12 @@ try{
  await worker.evaluate(async id=>{for(let n=0;n<100;n++){if(Zotero.Connector_Browser.getTabInfo(id).translators?.length)return;await new Promise(r=>setTimeout(r,100));}throw Error('redetection timeout');},tabID);
  const manual=await worker.evaluate(async id=>Zotero.Connector_Browser.onZoteroButtonElementClick(await browser.tabs.get(id)),tabID);
  assert.ok(Array.isArray(manual));assert.equal(uploads.length,2);assert.equal(saves.length,3);
- console.log('PASS: actual translator, cookie-bound PDF, binary upload, repeat safety, failed-PDF receipt and ordinary toolbar save');
+ const opened=await cli(['open',base+'/paper?open=1']);
+ assert.equal(opened.ok,true);assert.equal(opened.data.result.tab.state,'ready');
+ const inspected=await cli(['inspect','--tab-id',String(opened.data.result.tab.id)]);
+ assert.equal(inspected.ok,true);assert.equal(inspected.data.result.tab.state,'ready');
+ const fromURL=await cli(['save','--url',base+'/paper?save=1','--target','L4','--timeout','30']);
+ assert.equal(fromURL.ok,true);assert.equal(saves.length,4);assert.equal(uploads.length,3);
+ console.log('PASS: actual translator, cookie-bound PDF, binary upload, repeat safety, failed-PDF receipt, ordinary toolbar save and URL-driven opening/saving');
 }catch(e){console.error(e);process.exitCode=1;}
 finally{await browser.close();fake.close();broker.kill();await fs.rm(temp,{recursive:true,force:true});}

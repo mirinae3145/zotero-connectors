@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const root = path.join(__dirname, '..');
 function context() {
-    const c = { URL, console, setTimeout, AbortSignal, calls: [], selected: {
+    const c = { URL, console, setTimeout: callback => callback(), AbortSignal, calls: [], selected: {
         id: null, libraryID: 4, libraryName: 'Group', libraryEditable: true, filesEditable: true,
         targets: [{id: 'L4', name: 'Group'}]
     }};
@@ -14,10 +14,10 @@ function context() {
         initDeferred: { promise: { then() {} } },
         Prefs: { get: () => false },
         Connector: { checkIsOnline: async () => true, callMethod: async () => c.selected },
-        Connector_Browser: { getTabInfo: () => ({translators: [], detectionDone: true}),
+        Connector_Browser: { getTabInfo: () => ({translators: [{label:'Fixture'}], detectionDone: true}),
             onZoteroButtonElementClick: async (...args) => { c.calls.push(args); return c.receipt; } }
     };
-    c.browser = { tabs: { get: async id => ({id, url: 'https://journal.example/article'}),
+    c.browser = { tabs: { get: async id => ({id, url: 'https://journal.example/article', status: 'complete'}),
         query: async () => [{id: 1, url: 'https://journal.example/article?token=secret', title: 'Paper'}] } };
     c.receipt = {sessionID: 'session', desktopSaved: true, target: 'L4', items: [{attachments: [{mimeType: 'application/pdf', stored: true}]}]};
     vm.createContext(c);
@@ -71,6 +71,21 @@ test('previous receipt from another target cannot be reported as a new group sav
 });
 test('detection must complete before invoking the toolbar action', async () => {
     const c = context(); c.Zotero.Connector_Browser.getTabInfo = () => ({translators: []});
-    await assert.rejects(c.Zotero.BrowserBridge.execute({action: 'save', tab_id: 1}), /not ready/);
+    const result = await c.Zotero.BrowserBridge.execute({action: 'save', tab_id: 1});
+    assert.equal(result.ok, false);assert.equal(result.state, 'loading');
     assert.equal(c.calls.length, 0);
+});
+
+test('URL saving opens the tab itself and waits before the same toolbar call', async () => {
+    const c = context(); let opened;
+    c.browser.tabs.create = async options => {opened=options;return {id: 9};};
+    const result = await c.Zotero.BrowserBridge.execute({action: 'save', url:'https://journal.example/article'});
+    assert.equal(result.ok,true);assert.equal(opened.url,'https://journal.example/article');
+    assert.equal(c.calls[0][0].id,9);
+});
+test('CAPTCHA title is returned before creating any library item', async () => {
+    const c = context();
+    c.browser.tabs.get = async id => ({id,url:'https://journal.example/article',title:'Just a moment...',status:'complete'});
+    const result = await c.Zotero.BrowserBridge.execute({action:'save',tab_id:1});
+    assert.equal(result.ok,false);assert.equal(result.state,'needs_user_action');assert.equal(c.calls.length,0);
 });

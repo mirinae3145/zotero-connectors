@@ -11,6 +11,35 @@ Zotero.BrowserBridge = new class {
 		return response.json();
 	}
 
+	_tabStatus(tab) {
+		const url = new URL(tab.url);
+		const info = Zotero.Connector_Browser.getTabInfo(tab.id);
+		const challenge = /just a moment|attention required|access denied|verify (you|that)|captcha|security check|robot check/i.test(tab.title || '');
+		return { id: tab.id, title: tab.title, url: url.origin + url.pathname,
+			state: challenge ? 'needs_user_action' : (tab.status === 'complete' && (info.detectionDone || info.isPDF || info.uninjectable) ? 'ready' : 'loading'),
+			translators: (info.translators || []).map(t => t.label), isPDF: !!info.isPDF };
+	}
+
+	async _openOrGet(request) {
+		let tab;
+		if (request.url) {
+			const url = new URL(request.url);
+			if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) {
+				throw new Error('Select an HTTP(S) publication URL without credentials');
+			}
+			tab = await browser.tabs.create({url: request.url, active: true});
+		}
+		else {
+			tab = await browser.tabs.get(request.tab_id);
+		}
+		for (let n = 0; n < 120; n++) {
+			tab = await browser.tabs.get(tab.id);
+			if (/^https?:/.test(tab.url) && this._tabStatus(tab).state !== 'loading') return tab;
+			await new Promise(resolve => setTimeout(resolve, 250));
+		}
+		return tab;
+	}
+
 	async execute(request) {
 		if (request.action === 'tabs') {
 			const tabs = await browser.tabs.query({});
@@ -19,6 +48,14 @@ Zotero.BrowserBridge = new class {
 				// Query strings can contain publisher access tokens.
 				return { id: t.id, title: t.title, url: url.origin + url.pathname, active: t.active };
 			}) };
+		}
+		if (request.action === 'inspect') {
+			const tab = await browser.tabs.get(request.tab_id);
+			if (!/^https?:/.test(tab.url)) throw new Error('Select an HTTP(S) publication tab');
+			return {ok: true, tab: this._tabStatus(tab)};
+		}
+		if (request.action === 'open') {
+			return {ok: true, tab: this._tabStatus(await this._openOrGet(request))};
 		}
 		if (!await Zotero.Connector.checkIsOnline()) {
 			throw new Error('Open Zotero desktop before using browser CLI saving');
@@ -39,9 +76,18 @@ Zotero.BrowserBridge = new class {
 		if (Zotero.Prefs.get('firstUse')) {
 			throw new Error('Complete the Connector first-use prompt with its toolbar button first');
 		}
-		const tab = await browser.tabs.get(request.tab_id);
+		const tab = await this._openOrGet(request);
 		if (!/^https?:/.test(tab.url)) throw new Error('Select an HTTP(S) publication tab');
+		const page = this._tabStatus(tab);
+		if (page.state !== 'ready') {
+			return {ok: false, tab: page, state: page.state,
+				error: 'Connector page needs attention or is still loading; resolve it in the browser, then save the same tab ID'};
+		}
 		const info = Zotero.Connector_Browser.getTabInfo(tab.id);
+		if (request.require_pdf !== false && !info.translators?.length && !info.isPDF) {
+			return {ok: false, tab: page, state: 'needs_user_action',
+				error: 'Connector found no publication translator or PDF; inspect login/access in this tab before saving'};
+		}
 		if (!info.detectionDone && !info.isPDF && !info.uninjectable) {
 			throw new Error('Connector detection is not ready; reload the publication tab and retry');
 		}
@@ -51,7 +97,7 @@ Zotero.BrowserBridge = new class {
 		}
 		const after = await Zotero.Connector.callMethod('getSelectedCollection', {});
 		const afterTarget = after.id ? `C${after.id}` : `L${after.libraryID}`;
-		const result = { ...saved, selectedTarget: afterTarget, libraryID: after.libraryID, libraryName: after.libraryName };
+		const result = { ...saved, tab: page, selectedTarget: afterTarget, libraryID: after.libraryID, libraryName: after.libraryName };
 		if (afterTarget !== target || saved.target !== target) {
 			return { ...result, ok: false, error: 'Zotero target changed during saving; inspect the saved items before retrying' };
 		}
